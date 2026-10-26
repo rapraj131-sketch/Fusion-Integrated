@@ -1,124 +1,186 @@
-from rest_framework import status, views, permissions
+from drf_spectacular.utils import extend_schema
+from rest_framework import serializers, status, views
 from rest_framework.response import Response
-from modules.elm.models import LeaveRequest
-from modules.elm.services.leave_service import LeaveService
+
+from fusion_auth.permissions import HasModuleGrant, HasPermission
 from modules.elm.selectors.leave_selectors import (
-    get_user_leaves, get_user_balances, get_pending_substitute_requests, get_pending_unit_head_approvals
+    get_pending_approvals,
+    get_pending_substitute_requests,
+    get_user_balances,
+    get_user_leaves,
 )
+from modules.elm.services.leave_service import LeaveService
+
 from .serializers import (
-    LeaveRequestSerializer, LeaveBalanceSerializer, LeaveCreateSerializer,
-    SubstituteDecisionSerializer, ApproverDecisionSerializer
+    ApproverDecisionSerializer,
+    LeaveBalanceSerializer,
+    LeaveCreateSerializer,
+    LeaveRequestSerializer,
+    LeaveWithdrawSerializer,
+    SubstituteDecisionSerializer,
+    SubstituteReplacementSerializer,
 )
+
+MODULE = HasModuleGrant("elm")
+
+
+def _actor(request):
+    return request.principal
 
 
 class LeaveListCreateView(views.APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    def get_permissions(self):
+        permission = "elm.leave.apply" if self.request.method == "POST" else "elm.leave.view_self"
+        return [MODULE(), HasPermission(permission)()]
 
+    @extend_schema(
+        summary="List the authenticated employee's leave requests",
+        tags=["ELM"],
+        responses=LeaveRequestSerializer(many=True),
+    )
     def get(self, request):
-        user_id = str(request.user.username)
-        leaves = get_user_leaves(user_id)
-        serializer = LeaveRequestSerializer(leaves, many=True)
-        return Response(serializer.data)
+        leaves = get_user_leaves(str(_actor(request).user_id))
+        return Response(LeaveRequestSerializer(leaves, many=True).data)
 
+    @extend_schema(
+        summary="Submit a leave request",
+        tags=["ELM"],
+        request=LeaveCreateSerializer,
+        responses={201: LeaveRequestSerializer},
+    )
     def post(self, request):
-        user_id = str(request.user.username)
-        serializer = LeaveCreateSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        data = serializer.validated_data
+        payload = LeaveCreateSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
         try:
-            leave = LeaveService.apply_leave(
-                applicant_id=user_id,
-                leave_type=data["leave_type"],
-                start_date=data["start_date"],
-                end_date=data["end_date"],
-                duration_days=data["duration_days"],
-                reason=data["reason"],
-                is_half_day=data.get("is_half_day", False),
-                half_day_session=data.get("half_day_session", ""),
-                station_leave=data.get("station_leave", False),
-                station_leave_address=data.get("station_leave_address", ""),
-                out_of_station_from=data.get("out_of_station_from"),
-                out_of_station_to=data.get("out_of_station_to"),
-                substitute_id=data.get("substitute_id", ""),
-            )
-            return Response(LeaveRequestSerializer(leave).data, status=status.HTTP_201_CREATED)
-        except (ValueError, PermissionError) as e:
-            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+            leave = LeaveService.apply_leave(actor=_actor(request), **payload.validated_data)
+        except ValueError as exc:
+            raise serializers.ValidationError({"non_field_errors": [str(exc)]}) from exc
+        return Response(LeaveRequestSerializer(leave).data, status=status.HTTP_201_CREATED)
 
 
 class LeaveBalanceView(views.APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [MODULE, HasPermission("elm.leave.view_self")]
 
+    @extend_schema(
+        summary="List the authenticated employee's leave balances",
+        tags=["ELM"],
+        responses=LeaveBalanceSerializer(many=True),
+    )
     def get(self, request):
-        user_id = str(request.user.username)
-        balances = get_user_balances(user_id)
+        balances = get_user_balances(str(_actor(request).user_id))
         return Response(LeaveBalanceSerializer(balances, many=True).data)
 
 
 class SubstituteQueueView(views.APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [MODULE, HasPermission("elm.leave.substitute")]
 
+    @extend_schema(
+        summary="List requests assigned to the authenticated substitute",
+        tags=["ELM"],
+        responses=LeaveRequestSerializer(many=True),
+    )
     def get(self, request):
-        user_id = str(request.user.username)
-        requests = get_pending_substitute_requests(user_id)
+        requests = get_pending_substitute_requests(str(_actor(request).user_id))
         return Response(LeaveRequestSerializer(requests, many=True).data)
 
 
 class SubstituteDecisionView(views.APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [MODULE, HasPermission("elm.leave.substitute")]
 
+    @extend_schema(
+        summary="Accept or decline a substitute assignment",
+        tags=["ELM"],
+        request=SubstituteDecisionSerializer,
+        responses=LeaveRequestSerializer,
+    )
     def post(self, request, pk):
-        user_id = str(request.user.username)
-        serializer = SubstituteDecisionSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        try:
-            leave = LeaveService.respond_substitute(
-                leave_id=pk,
-                substitute_id=user_id,
-                accept=serializer.validated_data["accept"],
-                remarks=serializer.validated_data.get("remarks", ""),
-            )
-            return Response(LeaveRequestSerializer(leave).data)
-        except Exception as e:
-            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        payload = SubstituteDecisionSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        leave = LeaveService.respond_substitute(
+            leave_id=pk,
+            actor=_actor(request),
+            **payload.validated_data,
+        )
+        return Response(LeaveRequestSerializer(leave).data)
 
 
 class ApprovalsQueueView(views.APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [MODULE, HasPermission("elm.leave.approve")]
 
+    @extend_schema(
+        summary="List requests assigned to the active approver role",
+        tags=["ELM"],
+        responses=LeaveRequestSerializer(many=True),
+    )
     def get(self, request):
-        leaves = get_pending_unit_head_approvals()
+        leaves = get_pending_approvals(_actor(request).active_role or "")
         return Response(LeaveRequestSerializer(leaves, many=True).data)
 
 
 class ApproverDecisionView(views.APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [MODULE, HasPermission("elm.leave.approve")]
 
+    @extend_schema(
+        summary="Approve, reject, or forward a leave request",
+        tags=["ELM"],
+        request=ApproverDecisionSerializer,
+        responses=LeaveRequestSerializer,
+    )
     def post(self, request, pk):
-        user_id = str(request.user.username)
-        serializer = ApproverDecisionSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        try:
+        payload = ApproverDecisionSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        actor = _actor(request)
+        if actor.active_role == "director":
+            if payload.validated_data.get("forward_higher", False):
+                raise serializers.ValidationError(
+                    {"forward_higher": "The Authority stage cannot forward to itself."}
+                )
+            leave = LeaveService.review_authority(
+                leave_id=pk,
+                actor=actor,
+                approve=payload.validated_data["approve"],
+                remarks=payload.validated_data.get("remarks", ""),
+            )
+        else:
             leave = LeaveService.review_unit_head(
                 leave_id=pk,
-                approver_id=user_id,
-                approve=serializer.validated_data["approve"],
-                remarks=serializer.validated_data.get("remarks", ""),
-                forward_higher=serializer.validated_data.get("forward_higher", False),
+                actor=actor,
+                **payload.validated_data,
             )
-            return Response(LeaveRequestSerializer(leave).data)
-        except Exception as e:
-            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(LeaveRequestSerializer(leave).data)
 
 
 class LeaveWithdrawView(views.APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [MODULE, HasPermission("elm.leave.view_self")]
 
+    @extend_schema(
+        summary="Withdraw an eligible leave request",
+        tags=["ELM"],
+        request=LeaveWithdrawSerializer,
+        responses=LeaveRequestSerializer,
+    )
     def post(self, request, pk):
-        user_id = str(request.user.username)
-        reason = request.data.get("reason", "")
-        try:
-            leave = LeaveService.withdraw_leave(leave_id=pk, user_id=user_id, reason=reason)
-            return Response(LeaveRequestSerializer(leave).data)
-        except Exception as e:
-            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        payload = LeaveWithdrawSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        leave = LeaveService.withdraw_leave(
+            leave_id=pk, actor=_actor(request), **payload.validated_data
+        )
+        return Response(LeaveRequestSerializer(leave).data)
+
+
+class SubstituteReplacementView(views.APIView):
+    permission_classes = [MODULE, HasPermission("elm.leave.view_self")]
+
+    @extend_schema(
+        summary="Nominate a replacement after substitute decline",
+        tags=["ELM"],
+        request=SubstituteReplacementSerializer,
+        responses=LeaveRequestSerializer,
+    )
+    def post(self, request, pk):
+        payload = SubstituteReplacementSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        leave = LeaveService.replace_substitute(
+            leave_id=pk, actor=_actor(request), **payload.validated_data
+        )
+        return Response(LeaveRequestSerializer(leave).data)

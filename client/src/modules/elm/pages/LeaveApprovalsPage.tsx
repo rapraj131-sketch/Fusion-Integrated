@@ -5,18 +5,26 @@ import { useApprovalsQueue, decideApproval } from "../api/hooks";
 export function LeaveApprovalsPage() {
   const { requests, loading, error, refetch } = useApprovalsQueue();
   const [remarks, setRemarks] = useState<{ [id: string]: string }>({});
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const handleDecision = async (id: string, approve: boolean, forward: boolean = false) => {
     const note = remarks[id] || "";
-    await decideApproval(id, approve, note, forward);
-    refetch();
+    setActionError(null);
+    try {
+      await decideApproval(id, approve, note, forward);
+      await refetch();
+    } catch (err: any) {
+      const apiError = err?.response?.data?.error;
+      setActionError(apiError?.message || (typeof apiError === "string" ? apiError : null) || err.message || "Unable to record this decision.");
+    }
   };
 
   return (
     <div style={{ padding: "1.5rem" }}>
-      <PageHeader title="Leave Approval Queue" subtitle="Review and recommend departmental leave requests" />
+      <PageHeader title="Leave Approval Queue" subtitle="Review requests assigned to your active role" />
       {loading && <p>Loading approval queue...</p>}
       {error && <p style={{ color: "#dc2626" }}>{error}</p>}
+      {actionError && <p role="alert" style={{ color: "#dc2626" }}>{actionError}</p>}
       {!loading && requests.length === 0 && (
         <div style={{ textAlign: "center", padding: "3rem", background: "#f8fafc", borderRadius: 8 }}>
           <p style={{ color: "#64748b" }}>No pending requests requiring your review.</p>
@@ -24,7 +32,9 @@ export function LeaveApprovalsPage() {
       )}
       {!loading && requests.length > 0 && (
         <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
-          {requests.map((r) => (
+          {requests.map((r) => {
+            const recommendationStage = r.status === "PENDING_UNIT_HEAD" && !["CL", "RH"].includes(r.leave_type);
+            return (
             <div key={r.id} style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 8, padding: "1.25rem" }}>
               <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
                 <span style={{ fontWeight: 700, fontSize: 16 }}>{r.applicant_user_id} - {r.leave_type} ({r.duration_days} days)</span>
@@ -53,23 +63,18 @@ export function LeaveApprovalsPage() {
                   onClick={() => handleDecision(r.id, true, false)}
                   style={{ background: "#16a34a", color: "#fff", border: "none", padding: "6px 12px", borderRadius: 4, cursor: "pointer" }}
                 >
-                  Approve
-                </button>
-                <button
-                  onClick={() => handleDecision(r.id, true, true)}
-                  style={{ background: "#2563eb", color: "#fff", border: "none", padding: "6px 12px", borderRadius: 4, cursor: "pointer" }}
-                >
-                  Forward to Authority
+                  {recommendationStage ? "Recommend" : "Approve"}
                 </button>
                 <button
                   onClick={() => handleDecision(r.id, false, false)}
                   style={{ background: "#dc2626", color: "#fff", border: "none", padding: "6px 12px", borderRadius: 4, cursor: "pointer" }}
                 >
-                  Reject
+                  {recommendationStage ? "Not Recommended" : "Reject"}
                 </button>
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

@@ -2,6 +2,12 @@ import { useState, useEffect, useCallback } from "react";
 import { http } from "../../../lib/http";
 import type { LeaveRequest, LeaveBalance, ApplyLeavePayload } from "./types";
 
+function errorMessage(error: any): string {
+  const apiError = error?.response?.data?.error;
+  if (typeof apiError === "string") return apiError;
+  return apiError?.message || error?.message || "The request could not be completed.";
+}
+
 export function useMyLeaves() {
   const [leaves, setLeaves] = useState<LeaveRequest[]>([]);
   const [loading, setLoading] = useState(true);
@@ -14,7 +20,7 @@ export function useMyLeaves() {
       setLeaves(res.data);
       setError(null);
     } catch (err: any) {
-      setError(err?.response?.data?.error || err.message);
+      setError(errorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -39,7 +45,7 @@ export function useLeaveBalances() {
       setBalances(res.data);
       setError(null);
     } catch (err: any) {
-      setError(err?.response?.data?.error || err.message);
+      setError(errorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -64,7 +70,7 @@ export function useSubstituteQueue() {
       setRequests(res.data);
       setError(null);
     } catch (err: any) {
-      setError(err?.response?.data?.error || err.message);
+      setError(errorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -89,7 +95,7 @@ export function useApprovalsQueue() {
       setRequests(res.data);
       setError(null);
     } catch (err: any) {
-      setError(err?.response?.data?.error || err.message);
+      setError(errorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -123,5 +129,12 @@ export async function decideApproval(leaveId: string, approve: boolean, remarks:
 
 export async function withdrawLeaveRequest(leaveId: string, reason: string = ""): Promise<LeaveRequest> {
   const res = await http.post<LeaveRequest>(`/api/v1/elm/leaves/${leaveId}/withdraw/`, { reason });
+  return res.data;
+}
+
+export async function replaceLeaveSubstitute(leaveId: string, substituteId: string): Promise<LeaveRequest> {
+  const res = await http.post<LeaveRequest>(`/api/v1/elm/leaves/${leaveId}/substitute/`, {
+    substitute_id: substituteId,
+  });
   return res.data;
 }

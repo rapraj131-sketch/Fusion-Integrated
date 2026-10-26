@@ -5,6 +5,7 @@ export type LeaveStatus =
   | "PENDING_SUBSTITUTE"
   | "PENDING_UNIT_HEAD"
   | "PENDING_AUTHORITY"
+  | "APPLICANT_ACTION_REQUIRED"
   | "APPROVED"
   | "REJECTED"
   | "WITHDRAWN"
@@ -35,6 +36,7 @@ export interface LeaveBalance {
 export interface LeaveRequest {
   id: string;
   applicant_user_id: string;
+  applicant_role: string;
   leave_type: LeaveType;
   start_date: string;
   end_date: string;
@@ -52,6 +54,7 @@ export interface LeaveRequest {
   status: LeaveStatus;
   current_approver_role?: string;
   rejection_reason?: string;
+  unit_head_recommendation?: "RECOMMENDED" | "NOT_RECOMMENDED" | "";
   created_at: string;
   updated_at: string;
   action_logs?: LeaveActionLog[];

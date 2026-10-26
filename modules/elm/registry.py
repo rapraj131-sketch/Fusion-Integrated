@@ -58,7 +58,6 @@ PERMISSIONS = [
     ("elm.leave.view_self", "View own leave applications and balance ledger"),
     ("elm.leave.substitute", "Review and respond to substitute nominations"),
     ("elm.leave.approve", "Review and sanction subordinate leave requests"),
-    ("elm.leave.admin", "Manage leave quotas, calendar cycles and adjustments"),
 ]
 
 SYSTEM_PERMISSIONS = [
@@ -76,9 +75,7 @@ _UNIT_HEAD = _EMPLOYEE + [
     "elm.leave.approve",
 ]
 
-_ADMIN = _UNIT_HEAD + [
-    "elm.leave.admin",
-]
+_ADMIN = _UNIT_HEAD
 
 ROLE_GRANTS = {
     "faculty": _EMPLOYEE,

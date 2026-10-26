@@ -1,7 +1,13 @@
 import uuid
 from decimal import Decimal
+
 from django.db import models
+from django.db.models import Q
 from django.utils import timezone
+
+
+def current_leave_year() -> int:
+    return timezone.localdate().year
 
 
 class LeaveType(models.TextChoices):
@@ -18,6 +24,7 @@ class LeaveStatus(models.TextChoices):
     PENDING_SUBSTITUTE = "PENDING_SUBSTITUTE", "Pending Substitute Acceptance"
     PENDING_UNIT_HEAD = "PENDING_UNIT_HEAD", "Pending Unit Head Recommendation"
     PENDING_AUTHORITY = "PENDING_AUTHORITY", "Pending Sanctioning Authority"
+    APPLICANT_ACTION_REQUIRED = "APPLICANT_ACTION_REQUIRED", "Applicant Action Required"
     APPROVED = "APPROVED", "Approved"
     REJECTED = "REJECTED", "Rejected"
     WITHDRAWN = "WITHDRAWN", "Withdrawn by Applicant"
@@ -35,26 +42,40 @@ class LeaveBalance(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user_id = models.CharField(max_length=64, db_index=True)
     leave_type = models.CharField(max_length=8, choices=LeaveType.choices)
-    year = models.PositiveSmallIntegerField(default=2026)
+    year = models.PositiveSmallIntegerField(default=current_leave_year)
     credited = models.DecimalField(max_digits=5, decimal_places=1, default=Decimal("0.0"))
     availed = models.DecimalField(max_digits=5, decimal_places=1, default=Decimal("0.0"))
     pending = models.DecimalField(max_digits=5, decimal_places=1, default=Decimal("0.0"))
 
     class Meta:
         db_table = "elm_leave_balance"
-        unique_together = ("user_id", "leave_type", "year")
+        constraints = [
+            models.UniqueConstraint(
+                fields=("user_id", "leave_type", "year"),
+                name="elm_balance_user_type_year_uniq",
+            ),
+            models.CheckConstraint(
+                condition=Q(credited__gte=0) & Q(availed__gte=0) & Q(pending__gte=0),
+                name="elm_balance_values_nonnegative",
+            ),
+            models.CheckConstraint(
+                condition=Q(availed__lte=models.F("credited") - models.F("pending")),
+                name="elm_balance_usage_within_credit",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.user_id} - {self.leave_type}: {self.balance} days"
 
     @property
     def balance(self) -> Decimal:
         return self.credited - self.availed - self.pending
 
-    def __str__(self):
-        return f"{self.user_id} - {self.leave_type}: {self.balance} days"
-
 
 class LeaveRequest(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     applicant_user_id = models.CharField(max_length=64, db_index=True)
+    applicant_role = models.CharField(max_length=64, blank=True, default="")
     leave_type = models.CharField(max_length=8, choices=LeaveType.choices)
     start_date = models.DateField()
     end_date = models.DateField()
@@ -87,6 +108,7 @@ class LeaveRequest(models.Model):
     )
     current_approver_role = models.CharField(max_length=64, blank=True, default="unit_head")
     rejection_reason = models.TextField(blank=True, default="")
+    unit_head_recommendation = models.CharField(max_length=16, blank=True, default="")
 
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
@@ -94,6 +116,19 @@ class LeaveRequest(models.Model):
     class Meta:
         db_table = "elm_leave_request"
         ordering = ["-created_at"]
+        constraints = [
+            models.CheckConstraint(
+                condition=Q(duration_days__gt=0),
+                name="elm_leave_duration_positive",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    Q(is_half_day=False)
+                    | (Q(duration_days=Decimal("0.5")) & Q(start_date=models.F("end_date")))
+                ),
+                name="elm_half_day_single_day_half_duration",
+            ),
+        ]
 
     def __str__(self):
         return f"Leave {self.id} ({self.applicant_user_id} - {self.leave_type} - {self.status})"
@@ -115,3 +150,6 @@ class LeaveActionLog(models.Model):
     class Meta:
         db_table = "elm_action_log"
         ordering = ["created_at"]
+
+    def __str__(self):
+        return f"{self.action} for {self.leave_request_id} by {self.actor_user_id}"

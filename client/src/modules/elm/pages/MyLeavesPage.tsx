@@ -2,7 +2,7 @@ import React from "react";
 import { Link } from "react-router-dom";
 import { PageHeader } from "../../../ui/components/PageHeader";
 import { StatusBadge } from "../../../ui/components/StatusBadge";
-import { useMyLeaves, withdrawLeaveRequest } from "../api/hooks";
+import { replaceLeaveSubstitute, useMyLeaves, withdrawLeaveRequest } from "../api/hooks";
 
 export function MyLeavesPage() {
   const { leaves, loading, error, refetch } = useMyLeaves();
@@ -10,6 +10,14 @@ export function MyLeavesPage() {
   const handleWithdraw = async (id: string) => {
     if (window.confirm("Are you sure you want to withdraw this leave request?")) {
       await withdrawLeaveRequest(id, "Withdrawn by employee");
+      refetch();
+    }
+  };
+
+  const handleReplaceSubstitute = async (id: string) => {
+    const substituteId = window.prompt("Enter the replacement employee's Fusion user ID:");
+    if (substituteId?.trim()) {
+      await replaceLeaveSubstitute(id, substituteId.trim());
       refetch();
     }
   };
@@ -69,7 +77,15 @@ export function MyLeavesPage() {
                   <StatusBadge status={l.status} />
                 </td>
                 <td style={{ padding: 12 }}>
-                  {["PENDING_SUBSTITUTE", "PENDING_UNIT_HEAD", "PENDING_AUTHORITY"].includes(l.status) && (
+                  {l.status === "APPLICANT_ACTION_REQUIRED" && (
+                    <button
+                      onClick={() => handleReplaceSubstitute(l.id)}
+                      style={{ marginRight: 8, color: "#1d4ed8", background: "transparent", border: "1px solid #93c5fd", borderRadius: 4, padding: "4px 8px", cursor: "pointer" }}
+                    >
+                      Replace substitute
+                    </button>
+                  )}
+                  {["PENDING_SUBSTITUTE", "APPLICANT_ACTION_REQUIRED", "PENDING_UNIT_HEAD", "PENDING_AUTHORITY"].includes(l.status) && (
                     <button
                       onClick={() => handleWithdraw(l.id)}
                       style={{ color: "#ef4444", background: "transparent", border: "1px solid #fca5a5", borderRadius: 4, padding: "4px 8px", cursor: "pointer" }}

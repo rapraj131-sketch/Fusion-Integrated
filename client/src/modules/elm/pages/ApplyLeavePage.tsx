@@ -42,7 +42,8 @@ export function ApplyLeavePage() {
       });
       navigate("/elm/mine");
     } catch (err: any) {
-      setErrorMsg(err?.response?.data?.error || err.message || "Failed to submit leave request.");
+      const apiError = err?.response?.data?.error;
+      setErrorMsg(apiError?.message || (typeof apiError === "string" ? apiError : null) || err.message || "Failed to submit leave request.");
     } finally {
       setSubmitting(false);
     }
@@ -85,7 +86,10 @@ export function ApplyLeavePage() {
               type="date"
               required
               value={startDate}
-              onChange={(e) => setStartDate(e.target.value)}
+              onChange={(e) => {
+                setStartDate(e.target.value);
+                if (isHalfDay) setEndDate(e.target.value);
+              }}
               style={{ width: "100%", padding: 8, borderRadius: 4, border: "1px solid #cbd5e1" }}
             />
           </div>
@@ -95,10 +99,40 @@ export function ApplyLeavePage() {
               type="date"
               required
               value={endDate}
+              disabled={isHalfDay}
               onChange={(e) => setEndDate(e.target.value)}
               style={{ width: "100%", padding: 8, borderRadius: 4, border: "1px solid #cbd5e1" }}
             />
           </div>
+        </div>
+
+        <div style={{ marginBottom: "1rem" }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+            <input
+              type="checkbox"
+              checked={isHalfDay}
+              onChange={(e) => {
+                const checked = e.target.checked;
+                setIsHalfDay(checked);
+                if (checked) {
+                  setEndDate(startDate || endDate);
+                  setDuration("0.5");
+                } else {
+                  setDuration("1");
+                }
+              }}
+            />
+            <span style={{ fontWeight: 600 }}>Half-day leave</span>
+          </label>
+          {isHalfDay && (
+            <div style={{ marginTop: 8 }}>
+              <label style={{ display: "block", fontWeight: 600, marginBottom: 4 }}>Session</label>
+              <select value={session} onChange={(e) => setSession(e.target.value)}>
+                <option value="FN">Forenoon</option>
+                <option value="AN">Afternoon</option>
+              </select>
+            </div>
+          )}
         </div>
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem", marginBottom: "1rem" }}>
@@ -109,16 +143,17 @@ export function ApplyLeavePage() {
               step="0.5"
               min="0.5"
               required
-              value={duration}
+              disabled={isHalfDay}
+              value={isHalfDay ? "0.5" : duration}
               onChange={(e) => setDuration(e.target.value)}
               style={{ width: "100%", padding: 8, borderRadius: 4, border: "1px solid #cbd5e1" }}
             />
           </div>
           <div>
-            <label style={{ display: "block", fontWeight: 600, marginBottom: 4 }}>Substitute Employee ID / Username</label>
+            <label style={{ display: "block", fontWeight: 600, marginBottom: 4 }}>Substitute Fusion user ID</label>
             <input
               type="text"
-              placeholder="e.g. fac_cs_02"
+              placeholder="Numeric ID from Fusion"
               value={substituteId}
               onChange={(e) => setSubstituteId(e.target.value)}
               style={{ width: "100%", padding: 8, borderRadius: 4, border: "1px solid #cbd5e1" }}
@@ -151,6 +186,7 @@ export function ApplyLeavePage() {
                   <label style={{ display: "block", fontSize: 12 }}>Depart Jabalpur</label>
                   <input
                     type="date"
+                    required={stationLeave}
                     value={outFrom}
                     onChange={(e) => setOutFrom(e.target.value)}
                     style={{ width: "100%", padding: 6, borderRadius: 4, border: "1px solid #cbd5e1" }}
@@ -160,6 +196,7 @@ export function ApplyLeavePage() {
                   <label style={{ display: "block", fontSize: 12 }}>Return to Jabalpur</label>
                   <input
                     type="date"
+                    required={stationLeave}
                     value={outTo}
                     onChange={(e) => setOutTo(e.target.value)}
                     style={{ width: "100%", padding: 6, borderRadius: 4, border: "1px solid #cbd5e1" }}
